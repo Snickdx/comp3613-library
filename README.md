@@ -6,14 +6,17 @@ FastStart provides the SSR shell, JWT cookie auth, SQLModel, `manage.py`, and Re
 
 ## Quick start
 
-```powershell
+```text
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-Copy-Item .env.example .env
+cp .env.example .env   # Windows: Copy-Item .env.example .env
 python manage.py init
 python manage.py run
 ```
+
+Open http://127.0.0.1:5000 — SSR auth shell; scenario JSON under `/api` and OpenAPI at `/docs`.
 
 ## Seeded API accounts
 
