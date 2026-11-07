@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}StackRoom{% endblock %}
+
+{% block content %}
+<div class="landing">
+  <div class="landing-shelves" aria-hidden="true"></div>
+  <div class="landing-hairline" aria-hidden="true"></div>
+
+  <header class="landing-nav">
+    <a class="brand-wordmark" href="{{ url_for('index_view') }}">StackRoom</a>
+    <div class="landing-nav-actions">
+      {% if user_logged_in %}
+      <a class="btn-landing btn-landing-ghost" href="{{ app_home }}">Open workspace</a>
+      <a class="btn-landing btn-landing-ghost" href="{{ url_for('logout') }}">Sign out</a>
+      {% else %}
+      <a class="btn-landing btn-landing-ghost" href="{{ url_for('login_view') }}">Sign in</a>
+      <a class="btn-landing btn-landing-primary" href="{{ url_for('register_view') }}">Create account</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="landing-hero">
+    <h1 class="brand-wordmark">StackRoom</h1>
+    <p class="landing-lead">
+      Book library workshop rooms for your course sessions, with capacity and conflicts checked before you confirm.
+    </p>
+    <div class="landing-cta">
+      {% if user_logged_in %}
+      <a class="btn-landing btn-landing-primary" href="{{ app_home }}">Continue</a>
+      {% else %}
+      <a class="btn-landing btn-landing-primary" href="{{ url_for('register_view') }}">Create account</a>
+      <a class="btn-landing btn-landing-ghost" href="{{ url_for('login_view') }}">Sign in</a>
+      {% endif %}
+    </div>
+  </main>
+
+  <footer class="landing-foot">
+    After <code>python manage.py init</code>:
+    <code>coord</code> / coord-dev<span class="sep">·</span><code>admin</code> / admin-dev<span class="sep">·</span><code>lecturer1</code> / lect-dev
+  </footer>
+</div>
+{% endblock %}

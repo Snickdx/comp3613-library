@@ -1,0 +1,15 @@
+{% extends "authenticated-base.html" %}
+{% block title %}Home · StackRoom{% endblock %}
+
+{% block subpage_content %}
+<h1>Workshop rooms</h1>
+<p>
+  Browse rooms and bookings through the JSON API, then request a slot with an <code>X-User-Id</code> header.
+  Seed data (rooms and a sample booking) is ready after <code>python manage.py init</code>.
+</p>
+<div class="app-actions">
+  <a href="/docs">Open API docs</a>
+  <a class="secondary" href="/api/rooms">List rooms</a>
+  <a class="secondary" href="/api/bookings">List bookings</a>
+</div>
+{% endblock %}

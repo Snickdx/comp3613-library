@@ -1,0 +1,16 @@
+{% extends "authenticated-base.html" %}
+{% block title %}Admin · StackRoom{% endblock %}
+
+{% block subpage_content %}
+<h1>Admin</h1>
+<p>
+  Review the booking ledger and room list, then use the API for coordinator overrides and cancellations
+  (<code>POST /api/bookings/{id}/override-accept</code>).
+</p>
+<div class="app-actions">
+  <a href="/docs">Open API docs</a>
+  <a class="secondary" href="/api/bookings">All bookings</a>
+  <a class="secondary" href="/api/rooms">Rooms</a>
+  <a class="secondary" href="/api/confirmations/CONF-SEED01">Seed confirmation</a>
+</div>
+{% endblock %}

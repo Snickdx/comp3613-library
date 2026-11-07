@@ -1,0 +1,444 @@
+:root {
+  --brand-name: "StackRoom";
+  --brand-bg: #0b1c2c;
+  --brand-surface: #eef1f4;
+  --brand-ink: #132033;
+  --brand-muted: #6a7685;
+  --brand-accent: #c9a227;
+  --brand-accent-ink: #132033;
+  --brand-accent-2: #3d6b5a;
+  --brand-sidebar: #0b1c2c;
+  --brand-sidebar-text: #b7c4d0;
+  --brand-font-display: "Libre Baskerville", Georgia, "Times New Roman", serif;
+  --brand-font-body: "Karla", "Segoe UI", sans-serif;
+  --brand-radius: 0.3rem;
+  --brand-rule: rgba(183, 196, 208, 0.08);
+  --brand-rule-paper: rgba(19, 32, 51, 0.12);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--brand-font-body);
+  color: var(--brand-ink);
+  background: var(--brand-bg);
+}
+
+a {
+  color: inherit;
+}
+
+.brand-wordmark {
+  font-family: var(--brand-font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* —— Landing —— */
+.landing {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  color: var(--brand-surface);
+  background: var(--brand-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Vertical shelf rules */
+.landing-shelves {
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 95px,
+    var(--brand-rule) 95px,
+    var(--brand-rule) 96px
+  );
+  background-position: clamp(1.25rem, 4vw, 3rem) 0;
+  animation: shelves-in 1.4s ease-out both;
+  pointer-events: none;
+}
+
+/* Single gold hairline, aligned to hero left edge */
+.landing-hairline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: clamp(1.25rem, 4vw, 3rem);
+  width: 1px;
+  background: var(--brand-accent);
+  opacity: 0.85;
+  transform-origin: top;
+  animation: hairline-grow 1.2s ease-out both;
+  pointer-events: none;
+}
+
+.landing-nav,
+.landing-hero,
+.landing-foot {
+  position: relative;
+  z-index: 1;
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem clamp(1.25rem, 4vw, 3rem);
+  padding-left: calc(clamp(1.25rem, 4vw, 3rem) + 1.5rem);
+}
+
+.landing-nav .brand-wordmark {
+  font-size: 1.1rem;
+  color: var(--brand-surface);
+  text-decoration: none;
+}
+
+.landing-nav-actions {
+  display: flex;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.landing-hero {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(2rem, 8vh, 5rem) clamp(1.25rem, 4vw, 3rem) 3rem;
+  padding-left: calc(clamp(1.25rem, 4vw, 3rem) + 1.5rem);
+  max-width: 44rem;
+  animation: fade-up 0.9s ease-out 0.15s both;
+}
+
+.landing-hero .brand-wordmark {
+  font-size: clamp(3rem, 9.5vw, 5.6rem);
+  line-height: 1;
+  margin: 0 0 1.25rem;
+  color: #f7fafc;
+}
+
+.landing-lead {
+  font-size: clamp(1.05rem, 2vw, 1.2rem);
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--brand-surface) 78%, transparent);
+  margin: 0 0 2rem;
+  max-width: 30rem;
+}
+
+.landing-cta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.btn-landing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.35rem;
+  border-radius: var(--brand-radius);
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-landing-primary {
+  background: var(--brand-accent);
+  color: var(--brand-accent-ink);
+}
+
+.btn-landing-primary:hover {
+  background: color-mix(in srgb, var(--brand-accent) 85%, #fff);
+  color: var(--brand-accent-ink);
+}
+
+.btn-landing-ghost {
+  background: transparent;
+  color: var(--brand-surface);
+  border-color: color-mix(in srgb, var(--brand-sidebar-text) 45%, transparent);
+}
+
+.btn-landing-ghost:hover {
+  border-color: var(--brand-accent);
+  color: var(--brand-accent);
+}
+
+.landing-foot {
+  padding: 1.25rem clamp(1.25rem, 4vw, 3rem) 1.75rem;
+  padding-left: calc(clamp(1.25rem, 4vw, 3rem) + 1.5rem);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  color: var(--brand-sidebar-text);
+  border-top: 1px solid var(--brand-rule);
+}
+
+.landing-foot code {
+  color: var(--brand-accent);
+  font-size: 0.8rem;
+}
+
+.landing-foot .sep {
+  margin: 0 0.4rem;
+  color: var(--brand-muted);
+}
+
+@keyframes shelves-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes hairline-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-shelves,
+  .landing-hairline,
+  .landing-hero,
+  .app-main {
+    animation: none;
+  }
+}
+
+/* —— Auth —— */
+.auth-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background-color: var(--brand-bg);
+  background-image: repeating-linear-gradient(
+    90deg,
+    transparent 0,
+    transparent 95px,
+    var(--brand-rule) 95px,
+    var(--brand-rule) 96px
+  );
+}
+
+.auth-panel {
+  width: min(420px, 100%);
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+  border-radius: var(--brand-radius);
+  padding: 2rem 1.75rem;
+  border-top: 2px solid var(--brand-accent);
+  animation: fade-up 0.6s ease-out both;
+}
+
+.auth-panel .brand-wordmark {
+  font-size: 1.6rem;
+  margin-bottom: 0.25rem;
+  color: var(--brand-ink);
+}
+
+.auth-panel .auth-tagline {
+  color: var(--brand-muted);
+  margin-bottom: 1.5rem;
+}
+
+.auth-panel .form-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--brand-ink);
+}
+
+.auth-panel .form-control {
+  border-radius: var(--brand-radius);
+  border-color: var(--brand-rule-paper);
+  background: #fff;
+  color: var(--brand-ink);
+}
+
+.auth-panel .form-control:focus {
+  border-color: var(--brand-accent);
+  box-shadow: none;
+  outline: 1px solid var(--brand-accent);
+  outline-offset: 0;
+}
+
+.auth-panel .btn {
+  border-radius: var(--brand-radius);
+}
+
+.auth-panel .btn-primary {
+  background: var(--brand-accent);
+  border-color: var(--brand-accent);
+  color: var(--brand-accent-ink);
+  font-weight: 600;
+}
+
+.auth-panel .btn-primary:hover,
+.auth-panel .btn-primary:focus {
+  background: color-mix(in srgb, var(--brand-accent) 88%, #000);
+  border-color: color-mix(in srgb, var(--brand-accent) 88%, #000);
+  color: var(--brand-accent-ink);
+  box-shadow: none;
+}
+
+.auth-panel .btn-outline-secondary {
+  color: var(--brand-ink);
+  border-color: var(--brand-rule-paper);
+}
+
+.auth-panel .btn-outline-secondary:hover {
+  background: var(--brand-ink);
+  border-color: var(--brand-ink);
+  color: var(--brand-surface);
+}
+
+.auth-panel .alert {
+  border-radius: var(--brand-radius);
+}
+
+.auth-back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  color: var(--brand-muted);
+  text-decoration: none;
+}
+
+.auth-back:hover {
+  color: var(--brand-accent-2);
+}
+
+/* —— App shell —— */
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+}
+
+.app-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem clamp(1rem, 3vw, 2rem);
+  background: var(--brand-sidebar);
+  color: var(--brand-surface);
+  border-bottom: 1px solid var(--brand-accent);
+}
+
+.app-topbar .brand-wordmark {
+  font-size: 1.05rem;
+  text-decoration: none;
+  color: var(--brand-surface);
+}
+
+.app-topnav {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  flex-wrap: wrap;
+  font-size: 0.92rem;
+}
+
+.app-topnav a {
+  text-decoration: none;
+  color: var(--brand-sidebar-text);
+  padding-bottom: 2px;
+  border-bottom: 1px solid transparent;
+}
+
+.app-topnav a:hover,
+.app-topnav a.is-active {
+  color: var(--brand-surface);
+  border-bottom-color: var(--brand-accent);
+}
+
+.app-topnav .app-user {
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--brand-rule);
+  color: var(--brand-sidebar-text);
+}
+
+.app-main {
+  flex: 1;
+  padding: clamp(1.5rem, 4vw, 2.5rem) clamp(1.25rem, 3vw, 2rem);
+  max-width: 880px;
+  width: 100%;
+  margin: 0 auto;
+  animation: fade-up 0.45s ease-out both;
+}
+
+.app-main h1 {
+  font-family: var(--brand-font-display);
+  font-size: clamp(1.5rem, 3vw, 1.9rem);
+  letter-spacing: -0.01em;
+  margin: 0 0 0.75rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--brand-accent);
+}
+
+.app-main p {
+  color: var(--brand-muted);
+  margin: 0 0 1.5rem;
+  max-width: 38rem;
+  line-height: 1.65;
+}
+
+.app-main code {
+  color: var(--brand-accent-2);
+  font-size: 0.88em;
+}
+
+.app-main .alert {
+  border-radius: var(--brand-radius);
+}
+
+.app-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.app-actions a {
+  display: inline-flex;
+  padding: 0.6rem 1rem;
+  border-radius: var(--brand-radius);
+  text-decoration: none;
+  font-weight: 600;
+  background: var(--brand-ink);
+  color: var(--brand-surface);
+  border: 1px solid var(--brand-ink);
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+.app-actions a:hover {
+  background: var(--brand-accent-2);
+  border-color: var(--brand-accent-2);
+}
+
+.app-actions a.secondary {
+  background: transparent;
+  color: var(--brand-ink);
+  border-color: var(--brand-rule-paper);
+}
+
+.app-actions a.secondary:hover {
+  border-color: var(--brand-accent);
+  color: var(--brand-ink);
+}

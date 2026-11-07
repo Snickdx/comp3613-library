@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="app-shell">
+  <header class="app-topbar">
+    <a class="brand-wordmark" href="{{ url_for('index_view') }}">StackRoom</a>
+    <nav class="app-topnav" aria-label="App">
+      <a class="{{ 'is-active' if request.url.path.startswith('/app') }}" href="{{ url_for('user_home_view') }}">Home</a>
+      <a href="/docs">API docs</a>
+      <a href="{{ url_for('logout') }}">Sign out</a>
+      <span class="app-user">{{ user.username }}</span>
+    </nav>
+  </header>
+  <main class="app-main">
+    {% for message in get_flashed_messages(request) %}
+    <div class="alert alert-{{ message.type }}" role="alert">{{ message.message }}</div>
+    {% endfor %}
+    {% block subpage_content %}{% endblock %}
+  </main>
+</div>
+{% block subpage_scripts %}{% endblock %}
+{% endblock %}
