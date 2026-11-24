@@ -87,6 +87,7 @@ def override_accept(
         _actor_id(x_user_id),
         booking_id,
         override_justification=body.override_justification,
+        coordinator_override=True,
     )
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error"))

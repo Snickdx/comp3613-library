@@ -98,8 +98,26 @@ def test_first_come_first_served_rejects_later_booking(workflow_setup):
         resources="Whiteboard",
     )
 
-    assert result["ok"] is False
-    assert result["error"] == "earlier request wins"
+    assert result["ok"] is True
+    assert result["booking"]["status"] == "pending"
+    assert result["booking"]["confirmation_code"] is None
+    assert result["verdict"]["decision"] == "reject"
+
+    approval = bookings.coordinator_override_accept(
+        3,
+        result["booking"]["id"],
+    )
+
+    assert approval["ok"] is False
+    assert approval["verdict"]["decision"] == "reject"
+
+    with Session(engine) as session:
+        existing_saved = session.get(Booking, existing["id"])
+        conflicting = session.get(Booking, result["booking"]["id"])
+
+        assert existing_saved.status == "accepted"
+        assert conflicting.status == "pending"
+        assert conflicting.confirmation_code is None
 
 def test_booking_rejected_when_headcount_exceeds_room_capacity(workflow_setup):
     room_id = workflow_setup["room_id"]
@@ -164,6 +182,7 @@ def test_coordinator_can_override_booking(workflow_setup):
         3,
         incoming["id"],
         override_justification="Approved because the incoming cohort is larger.",
+        coordinator_override=True,
     )
 
     assert result["ok"] is True
@@ -343,5 +362,24 @@ def test_overlapping_booking_is_rejected(workflow_setup):
         resources="Projector",
     )
 
-    assert result["ok"] is False
+    assert result["ok"] is True
+    assert result["booking"]["status"] == "pending"
+    assert result["booking"]["confirmation_code"] is None
+    assert result["verdict"]["decision"] == "reject"
+
+    approval = bookings.coordinator_override_accept(
+        3,
+        result["booking"]["id"],
+    )
+
+    assert approval["ok"] is False
+    assert approval["verdict"]["decision"] == "reject"
+
+    with Session(workflow_setup["engine"]) as session:
+        existing_saved = session.get(Booking, existing["id"])
+        conflicting = session.get(Booking, result["booking"]["id"])
+
+        assert existing_saved.status == "accepted"
+        assert conflicting.status == "pending"
+        assert conflicting.confirmation_code is None
 
