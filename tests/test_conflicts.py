@@ -47,7 +47,11 @@ def test_resolver_requires_override_for_larger_cohort():
             "created_at": "2026-02-01",
         }
     ]
-    incoming = {"id": 2, "headcount": 25}
+    incoming = {
+        "id": 2,
+        "headcount": 25,
+        "created_at": "2026-02-02",
+    }
 
     rejected = resolve_slot_request(
         incoming=incoming,
@@ -72,7 +76,11 @@ def test_resolver_requires_override_for_larger_cohort():
 
 def test_resolver_never_accepts_capacity_overbook():
     result = resolve_slot_request(
-        incoming={"id": 2, "headcount": 35},
+        incoming={
+            "id": 2,
+            "headcount": 35,
+            "created_at": "2026-02-02",
+        },
         existing=[
             {
                 "id": 1,
@@ -83,10 +91,40 @@ def test_resolver_never_accepts_capacity_overbook():
         ],
         room={"capacity": 30},
         coordinator_override=True,
+        override_justification="authorized despite available room concern",
     )
 
     assert result["decision"] == "reject"
     assert result["reason"] == "room capacity exceeded"
+    assert result["override_used"] is False
+    assert result["displace_ids"] == []
+
+
+def test_resolver_override_cannot_bypass_invalid_submission_timestamp():
+    incoming = {
+        "id": 2,
+        "headcount": 25,
+        "created_at": "not-a-timestamp",
+    }
+    existing = [
+        {
+            "id": 1,
+            "headcount": 20,
+            "status": "accepted",
+            "created_at": "2026-02-01",
+        }
+    ]
+
+    result = resolve_slot_request(
+        incoming=incoming,
+        existing=existing,
+        room={"capacity": 30},
+        coordinator_override=True,
+        override_justification="approved",
+    )
+
+    assert result["decision"] == "reject"
+    assert result["reason"] == "incoming booking has missing or invalid created_at"
     assert result["override_used"] is False
     assert result["displace_ids"] == []
 

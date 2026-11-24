@@ -9,6 +9,8 @@ from app.services.conflict_strategy import (
     ConflictResult,
     ConflictStrategy,
 )
+from app.services.first_come_first_served import FirstComeFirstServed
+from app.services.larger_cohort_override import LargerCohortOverride
 
 DEFAULT_CAPACITY = 30
 
@@ -22,8 +24,12 @@ def room_capacity(room: dict[str, Any] | None) -> int:
     return int(cap)
 
 
-class EarlierRequestWinsStrategy(ConflictStrategy):
-    """Prefer the earliest active request in a shared room/date slot."""
+class CoordinatorOverrideStrategy(ConflictStrategy):
+    """Apply FCFS first, then authorize larger-cohort overrides."""
+
+    def __init__(self) -> None:
+        self.fcfs = FirstComeFirstServed()
+        self.larger_cohort = LargerCohortOverride()
 
     def evaluate(
         self,
@@ -33,72 +39,51 @@ class EarlierRequestWinsStrategy(ConflictStrategy):
         coordinator_override: bool = False,
         override_justification: str | None = None,
     ) -> ConflictResult:
-        active = [
-            booking
-            for booking in existing
-            if booking.get("status") in {"accepted", "pending"}
-        ]
-
-        if not active:
-            return {
-                "decision": "accept",
-                "reason": "slot free",
-                "override_used": False,
-                "displace_ids": [],
-                "policy": "earlier-request-wins",
-            }
-
-        ordered = sorted(
-            active,
-            key=lambda booking: str(booking.get("created_at") or ""),
+        fcfs_result = self.fcfs.evaluate(
+            incoming=incoming,
+            existing=existing,
+            coordinator_override=coordinator_override,
+            override_justification=override_justification,
         )
-        champion = ordered[0]
-        incoming_headcount = int(incoming.get("headcount", 0))
-        champion_headcount = int(champion.get("headcount", 0))
 
-        if (
-            coordinator_override
-            and incoming_headcount > champion_headcount
-        ):
-            result: ConflictResult = {
-                "decision": "accept",
-                "reason": "larger cohort coordinator override",
-                "override_used": True,
-                "displace_ids": [int(champion["id"])],
-                "policy": "earlier-request-wins",
-            }
-            if override_justification is not None:
-                result["override_justification"] = override_justification
-            return result
+        if fcfs_result["decision"] == "accept":
+            return fcfs_result
 
-        if incoming_headcount > champion_headcount:
+        if fcfs_result["reason"] not in {
+            "existing booking submitted earlier",
+            "existing booking has equal submission timestamp",
+        }:
+            return fcfs_result
+
+        if not coordinator_override:
             return {
                 "decision": "reject",
-                "reason": "larger cohort requires coordinator override",
+                "reason": "earlier request wins",
                 "override_used": False,
                 "displace_ids": [],
                 "policy": "earlier-request-wins",
             }
 
-        return {
-            "decision": "reject",
-            "reason": "earlier request wins",
-            "override_used": False,
-            "displace_ids": [],
-            "policy": "earlier-request-wins",
-        }
+        return self.larger_cohort.evaluate(
+            incoming=incoming,
+            existing=existing,
+            coordinator_override=coordinator_override,
+            override_justification=override_justification,
+        )
 
 
-# A descriptive alias for diagrams and callers that prefer the FCFS term.
-FirstComeFirstServedStrategy = EarlierRequestWinsStrategy
-EarlierRequestStrategy = EarlierRequestWinsStrategy
+# Compatibility aliases for existing callers.
+EarlierRequestWinsStrategy = CoordinatorOverrideStrategy
+FirstComeFirstServedStrategy = CoordinatorOverrideStrategy
+EarlierRequestStrategy = CoordinatorOverrideStrategy
+LargerCohortOverrideStrategy = LargerCohortOverride
 
 
 class ConflictResolver:
     """Context that applies a conflict strategy and room capacity policy."""
 
     def __init__(self, strategy: ConflictStrategy | None = None) -> None:
-        self.strategy = strategy or EarlierRequestWinsStrategy()
+        self.strategy = strategy or CoordinatorOverrideStrategy()
 
     def set_strategy(self, strategy: ConflictStrategy) -> None:
         if not isinstance(strategy, ConflictStrategy):
