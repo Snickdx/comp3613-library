@@ -84,9 +84,24 @@ def request_booking(
     if not user or user["role"] != "lecturer":
         return {"ok": False, "error": "lecturers only"}
 
-    # DEFECT: incomplete validation — empty resources / missing course allowed
-    if headcount <= 0:
-        return {"ok": False, "error": "headcount must be positive"}
+    # DEFECT: incomplete validation — empty resources / missing course allowed (fixed)
+    # Validate the required booking information.
+    if not isinstance(course_code, str) or not course_code.strip():
+        return {"ok": False, "error": "course code is required"}
+
+    if type(headcount) is not int or headcount <= 0:
+        return {"ok": False, "error": "headcount must be a positive integer"}
+
+    try:
+        date = datetime.strptime(preferred_date, "%Y-%m-%d")
+        if date.strftime("%Y-%m-%d") != preferred_date:
+            return {"ok": False, "error": "invalid preferred date"}
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "invalid preferred date"}
+
+    if not isinstance(resources, str) or not resources.strip():
+        return {"ok": False, "error": "resources are required"}
+
     if not _valid_time_range(start_time, end_time):
         return {"ok": False, "error": "invalid workshop time range"}
 
