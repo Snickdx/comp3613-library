@@ -9,6 +9,7 @@ from app.services.conflict_strategy import (
     ConflictResult,
     ConflictStrategy,
 )
+from app.services.first_come_first_served import FirstComeFirstServed
 
 DEFAULT_CAPACITY = 30
 
@@ -22,9 +23,13 @@ def room_capacity(room: dict[str, Any] | None) -> int:
     return int(cap)
 
 
-class EarlierRequestWinsStrategy(ConflictStrategy):
-    """Prefer the earliest active request in a shared room/date slot."""
+class CoordinatorOverrideStrategy(ConflictStrategy):
+    """Adds justified larger-cohort overrides to first-come-first-served."""
 
+    def __init__(self) -> None:
+        self.base_strategy = FirstComeFirstServed()
+
+    
     def evaluate(
         self,
         *,
@@ -33,72 +38,74 @@ class EarlierRequestWinsStrategy(ConflictStrategy):
         coordinator_override: bool = False,
         override_justification: str | None = None,
     ) -> ConflictResult:
+
+        result = self.base_strategy.evaluate(
+            incoming=incoming,
+            existing=existing,
+        )
+
+        # Preserve the existing ConflictResolver response wording.
+        if result.get("reason") == "existing booking submitted earlier":
+            result["reason"] = "earlier request wins"
+
+        result.setdefault("policy", "first-come-first-served")
+
         active = [
-            booking
-            for booking in existing
+            booking for booking in existing
             if booking.get("status") in {"accepted", "pending"}
         ]
 
-        if not active:
-            return {
-                "decision": "accept",
-                "reason": "slot free",
-                "override_used": False,
-                "displace_ids": [],
-                "policy": "earlier-request-wins",
-            }
-
-        ordered = sorted(
-            active,
-            key=lambda booking: str(booking.get("created_at") or ""),
-        )
-        champion = ordered[0]
-        incoming_headcount = int(incoming.get("headcount", 0))
-        champion_headcount = int(champion.get("headcount", 0))
-
-        if (
-            coordinator_override
-            and incoming_headcount > champion_headcount
-        ):
-            result: ConflictResult = {
-                "decision": "accept",
-                "reason": "larger cohort coordinator override",
-                "override_used": True,
-                "displace_ids": [int(champion["id"])],
-                "policy": "earlier-request-wins",
-            }
-            if override_justification is not None:
-                result["override_justification"] = override_justification
+        if not coordinator_override or not active:
             return result
 
-        if incoming_headcount > champion_headcount:
+        champion = min(
+            active,
+            key=lambda b: str(b.get("created_at") or ""),
+        )
+
+        if int(incoming.get("headcount", 0)) <= int(
+            champion.get("headcount", 0)
+        ):
+            return result
+
+        if result["decision"] == "accept":
+            return result
+
+        if not override_justification or not override_justification.strip():
             return {
                 "decision": "reject",
-                "reason": "larger cohort requires coordinator override",
+                "reason": "override justification is required",
                 "override_used": False,
                 "displace_ids": [],
-                "policy": "earlier-request-wins",
+            }
+
+        if not isinstance(champion.get("id"), int):
+            return {
+                "decision": "reject",
+                "reason": "existing booking has missing or invalid id",
+                "override_used": False,
+                "displace_ids": [],
             }
 
         return {
-            "decision": "reject",
-            "reason": "earlier request wins",
-            "override_used": False,
-            "displace_ids": [],
-            "policy": "earlier-request-wins",
+            "decision": "accept",
+            "reason": "larger cohort coordinator override",
+            "override_used": True,
+            "displace_ids": [champion["id"]],
+            "override_justification": override_justification.strip(),
         }
 
 
-# A descriptive alias for diagrams and callers that prefer the FCFS term.
-FirstComeFirstServedStrategy = EarlierRequestWinsStrategy
-EarlierRequestStrategy = EarlierRequestWinsStrategy
-
+# Backward compatibility with existing callers.
+EarlierRequestWinsStrategy = CoordinatorOverrideStrategy
+EarlierRequestStrategy = CoordinatorOverrideStrategy
+FirstComeFirstServedStrategy = CoordinatorOverrideStrategy
 
 class ConflictResolver:
     """Context that applies a conflict strategy and room capacity policy."""
 
     def __init__(self, strategy: ConflictStrategy | None = None) -> None:
-        self.strategy = strategy or EarlierRequestWinsStrategy()
+        self.strategy = strategy or CoordinatorOverrideStrategy()
 
     def set_strategy(self, strategy: ConflictStrategy) -> None:
         if not isinstance(strategy, ConflictStrategy):

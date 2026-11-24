@@ -83,6 +83,7 @@ def test_resolver_never_accepts_capacity_overbook():
         ],
         room={"capacity": 30},
         coordinator_override=True,
+        override_justification="Approved larger cohort",
     )
 
     assert result["decision"] == "reject"
