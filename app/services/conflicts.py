@@ -1,17 +1,14 @@
-"""
-Same-slot conflict / capacity resolution — procedural policy soup.
-
-Main booking workflow asks: when a new request hits a room+date that already
-has accepted (or pending) bookings, who wins?
-
-Intended design fix: Strategy (or composed policies) — e.g. CapacityGuard,
-EarlierRequestWins, LargerCohortOverride — instead of one nested function that
-mixes all rules and gets them wrong.
-"""
+"""Same-slot conflict resolution using the Strategy pattern."""
 
 from __future__ import annotations
 
 from typing import Any
+
+from app.services.conflict_strategy import (
+    BookingData,
+    ConflictResult,
+    ConflictStrategy,
+)
 
 DEFAULT_CAPACITY = 30
 
@@ -25,103 +22,155 @@ def room_capacity(room: dict[str, Any] | None) -> int:
     return int(cap)
 
 
+class EarlierRequestWinsStrategy(ConflictStrategy):
+    """Prefer the earliest active request in a shared room/date slot."""
+
+    def evaluate(
+        self,
+        *,
+        incoming: BookingData,
+        existing: list[BookingData],
+        coordinator_override: bool = False,
+        override_justification: str | None = None,
+    ) -> ConflictResult:
+        active = [
+            booking
+            for booking in existing
+            if booking.get("status") in {"accepted", "pending"}
+        ]
+
+        if not active:
+            return {
+                "decision": "accept",
+                "reason": "slot free",
+                "override_used": False,
+                "displace_ids": [],
+                "policy": "earlier-request-wins",
+            }
+
+        ordered = sorted(
+            active,
+            key=lambda booking: str(booking.get("created_at") or ""),
+        )
+        champion = ordered[0]
+        incoming_headcount = int(incoming.get("headcount", 0))
+        champion_headcount = int(champion.get("headcount", 0))
+
+        if (
+            coordinator_override
+            and incoming_headcount > champion_headcount
+        ):
+            result: ConflictResult = {
+                "decision": "accept",
+                "reason": "larger cohort coordinator override",
+                "override_used": True,
+                "displace_ids": [int(champion["id"])],
+                "policy": "earlier-request-wins",
+            }
+            if override_justification is not None:
+                result["override_justification"] = override_justification
+            return result
+
+        if incoming_headcount > champion_headcount:
+            return {
+                "decision": "reject",
+                "reason": "larger cohort requires coordinator override",
+                "override_used": False,
+                "displace_ids": [],
+                "policy": "earlier-request-wins",
+            }
+
+        return {
+            "decision": "reject",
+            "reason": "earlier request wins",
+            "override_used": False,
+            "displace_ids": [],
+            "policy": "earlier-request-wins",
+        }
+
+
+# A descriptive alias for diagrams and callers that prefer the FCFS term.
+FirstComeFirstServedStrategy = EarlierRequestWinsStrategy
+EarlierRequestStrategy = EarlierRequestWinsStrategy
+
+
+class ConflictResolver:
+    """Context that applies a conflict strategy and room capacity policy."""
+
+    def __init__(self, strategy: ConflictStrategy | None = None) -> None:
+        self.strategy = strategy or EarlierRequestWinsStrategy()
+
+    def set_strategy(self, strategy: ConflictStrategy) -> None:
+        if not isinstance(strategy, ConflictStrategy):
+            raise TypeError("strategy must implement ConflictStrategy")
+        self.strategy = strategy
+
+    def change_strategy(self, strategy: ConflictStrategy) -> None:
+        self.set_strategy(strategy)
+
+    def resolve(
+        self,
+        *,
+        incoming: BookingData,
+        existing: list[BookingData],
+        room: BookingData | None = None,
+        coordinator_override: bool = False,
+        override_justification: str | None = None,
+    ) -> ConflictResult:
+        from app.services.capacity_guard import CapacityGuard
+
+        result = self.strategy.evaluate(
+            incoming=incoming,
+            existing=existing,
+            coordinator_override=coordinator_override,
+            override_justification=override_justification,
+        )
+
+        if result["decision"] == "reject":
+            return result
+
+        displace_ids = set(result.get("displace_ids") or [])
+        remaining = [
+            booking
+            for booking in existing
+            if booking.get("id") not in displace_ids
+        ]
+        capacity = CapacityGuard().check(
+            incoming=incoming,
+            existing=remaining,
+            room=room,
+        )
+        if not capacity["allowed"]:
+            return {
+                "decision": "reject",
+                "reason": "room capacity exceeded",
+                "override_used": False,
+                "displace_ids": [],
+                "policy": result.get("policy"),
+            }
+
+        return result
+
+    evaluate = resolve
+    resolve_slot_request = resolve
+
+
+_default_resolver = ConflictResolver()
+
+
 def resolve_slot_request(
     *,
     incoming: dict[str, Any],
     existing: list[dict[str, Any]],
     room: dict[str, Any] | None,
     coordinator_override: bool = False,
+    override_justification: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Decide accept / reject / displace for an incoming booking request.
-
-    DEFECTS (seeded):
-    - Capacity is checked against the incoming headcount alone, not sum of
-      accepted bookings on the slot — silent overbooking when several fit
-      individually.
-    - "Earlier wins" is inverted: prefers the *latest* existing booking when
-      comparing timestamps.
-    - Larger-cohort override ignores whether coordinator_override was actually
-      requested; any larger headcount auto-displaces.
-    - Rejected/cancelled bookings are sometimes still counted.
-    - Does not record a clean audit of which rule fired.
-    """
-    capacity = room_capacity(room)
-    headcount = int(incoming["headcount"])
-
-    # DEFECT: only compares incoming to capacity, not aggregate occupancy
-    if headcount > capacity:
-        # even this path is wrong under override — still rejects huge cohorts
-        # but small overbooks slip through the aggregate hole above
-        if coordinator_override and headcount <= capacity + 5:
-            return {
-                "decision": "accept",
-                "override_used": True,
-                "displace_ids": [],
-                "reason": "soft capacity stretch",
-            }
-        return {
-            "decision": "reject",
-            "override_used": False,
-            "displace_ids": [],
-            "reason": "exceeds room capacity",
-        }
-
-    active = [
-        b
-        for b in existing
-        if b.get("status") in {"accepted", "pending", "cancelled"}
-        # DEFECT: cancelled still treated as blocking
-    ]
-
-    if not active:
-        return {
-            "decision": "accept",
-            "override_used": False,
-            "displace_ids": [],
-            "reason": "slot free",
-        }
-
-    # Sort by created_at — then pick the *last* as "winner" (inverted FCFS)
-    ordered = sorted(active, key=lambda b: b.get("created_at") or "")
-    champion = ordered[-1] if ordered else None
-
-    displace_ids: list[int] = []
-    override_used = False
-
-    if champion is not None:
-        # DEFECT: larger cohort always wins without requiring coordinator flag
-        if headcount > int(champion["headcount"]):
-            displace_ids = [champion["id"]]
-            override_used = True  # marked override even when not requested
-            return {
-                "decision": "accept",
-                "override_used": override_used,
-                "displace_ids": displace_ids,
-                "reason": "larger cohort auto-wins",
-            }
-
-        # DEFECT: if not larger, still accept alongside — overbook
-        if headcount <= int(champion["headcount"]):
-            return {
-                "decision": "accept",
-                "override_used": False,
-                "displace_ids": [],
-                "reason": "coexist on slot",  # should reject or waitlist
-            }
-
-    if coordinator_override:
-        displace_ids = [b["id"] for b in active if b.get("status") == "accepted"]
-        return {
-            "decision": "accept",
-            "override_used": True,
-            "displace_ids": displace_ids,
-            "reason": "coordinator override",
-        }
-
-    return {
-        "decision": "accept",
-        "override_used": False,
-        "displace_ids": [],
-        "reason": "fallback accept",
-    }
+    """Compatibility entry point for the existing booking service."""
+    return _default_resolver.resolve(
+        incoming=incoming,
+        existing=existing,
+        room=room,
+        coordinator_override=coordinator_override,
+        override_justification=override_justification,
+    )
