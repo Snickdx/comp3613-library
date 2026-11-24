@@ -143,6 +143,7 @@ def request_booking(
             displaced = session.get(Booking, bid)
             if displaced is not None:
                 displaced.status = "rejected"
+                displaced.confirmation_code = None
                 session.add(displaced)
 
         # DEFECT: new requests go straight to accepted (skip pending coordinator review)
@@ -214,6 +215,7 @@ def coordinator_override_accept(
             displaced = session.get(Booking, bid)
             if displaced is not None:
                 displaced.status = "rejected"
+                displaced.confirmation_code = None
                 session.add(displaced)
         code = booking.get("confirmation_code") or f"CONF-{uuid4().hex[:8].upper()}"
         booking_row.status = "accepted"
@@ -238,8 +240,19 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
         if user["role"] not in {"lecturer", "coordinator", "admin"}:
             return {"ok": False, "error": "forbidden"}
 
-        # DEFECT: cancel sets status but confirmation_code remains usable
+        # DEFECT: cancel sets status but confirmation_code remains usable 
+        # Check whether the workshop has already started.
+        workshop_start = datetime.strptime(
+            f"{booking.preferred_date} {booking.start_time}",
+            "%Y-%m-%d %H:%M",
+        )
+
+        if datetime.now() >= workshop_start:
+            return {"ok": False, "error": "workshop has already started"}
+
+        # Cancel the booking and invalidate its confirmation.
         booking.status = "cancelled"
+        booking.confirmation_code = None
         session.add(booking)
         session.commit()
         session.refresh(booking)
@@ -249,9 +262,12 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
 def get_confirmation(code: str) -> dict[str, Any]:
     with Session(default_engine) as session:
         row = session.exec(
-            select(Booking).where(Booking.confirmation_code == code)
+            select(Booking).where(
+                Booking.confirmation_code == code,
+                Booking.status == "accepted",
+            )
         ).first()
         if row is None:
             return {"ok": False, "error": "not found"}
-        # DEFECT: returns confirmation even when cancelled/rejected
+
         return {"ok": True, "booking": row.model_dump()}
