@@ -29,6 +29,16 @@ Open http://127.0.0.1:5000 — SSR auth shell; scenario JSON under `/api` and Op
 
 JSON login: `POST /api/auth/login` with `{"email","password"}`. Booking endpoints identify the actor with an `X-User-Id` header (demo auth).
 
+## Administrator room management
+
+Sign in through the app as an administrator. The authenticated session is required for:
+
+- `GET /api/admin/rooms` — list room configurations and effective capacities.
+- `GET /api/admin/rooms/{room_id}` — view one room.
+- `PATCH /api/admin/rooms/{room_id}` — update a room name and/or capacity.
+
+Capacity must be a positive integer. Set it to `null` to use the default capacity of 30. The public `GET /api/rooms` endpoint remains available for room browsing.
+
 ## Student brief
 
 See [`ASSIGNMENT.md`](ASSIGNMENT.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).
