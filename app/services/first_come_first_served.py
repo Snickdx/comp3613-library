@@ -60,6 +60,52 @@ class FirstComeFirstServed(ConflictStrategy):
 
         if incoming_created_at <= earliest_existing:
             if incoming_created_at == earliest_existing:
+                earliest_bookings = [
+                    booking
+                    for booking, created_at in zip(active_existing, existing_timestamps)
+                    if created_at == earliest_existing
+                ]
+                if any(
+                    not isinstance(booking.get("id"), int)
+                    or isinstance(booking.get("id"), bool)
+                    for booking in earliest_bookings
+                ):
+                    return {
+                        "decision": "reject",
+                        "reason": "existing booking has missing or invalid id",
+                        "override_used": False,
+                        "displace_ids": [],
+                    }
+
+                incoming_id = incoming.get("id")
+                if (
+                    isinstance(incoming_id, int)
+                    and not isinstance(incoming_id, bool)
+                    and incoming_id < min(
+                        booking["id"] for booking in earliest_bookings
+                    )
+                ):
+                    if any(
+                        not isinstance(booking.get("id"), int)
+                        or isinstance(booking.get("id"), bool)
+                        for booking in active_existing
+                    ):
+                        return {
+                            "decision": "reject",
+                            "reason": "existing booking has missing or invalid id",
+                            "override_used": False,
+                            "displace_ids": [],
+                        }
+
+                    return {
+                        "decision": "accept",
+                        "reason": "incoming booking has lower booking ID",
+                        "override_used": False,
+                        "displace_ids": [
+                            booking["id"] for booking in active_existing
+                        ],
+                    }
+
                 return {
                     "decision": "reject",
                     "reason": "existing booking has equal submission timestamp",

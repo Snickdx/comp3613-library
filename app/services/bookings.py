@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from threading import RLock
 from typing import Any
 from uuid import uuid4
 
 from sqlmodel import Session, select
+from sqlalchemy import text
 
 from app.database import engine as default_engine
 from app.models.booking import Booking
 from app.models.room import Room
+from app.services.capacity_guard import CapacityGuard
 from app.services.conflicts import resolve_slot_request
 from app.services.library_auth import get_user
 from app.services.rooms import list_rooms as list_room_configurations
+
+
+_approval_lock = RLock()
 
 
 def _now() -> str:
@@ -150,19 +156,30 @@ def request_booking(
         )
 
         if verdict["decision"] == "reject":
-            return {"ok": False, "error": verdict["reason"], "verdict": verdict}
+            priority_reasons = {
+                "earlier request wins",
+                "existing booking submitted earlier",
+                "existing booking has equal submission timestamp",
+            }
+            if verdict["reason"] not in priority_reasons:
+                return {
+                    "ok": False,
+                    "error": verdict["reason"],
+                    "verdict": verdict,
+                }
 
-        for bid in verdict.get("displace_ids") or []:
-            # DEFECT: displace marks rejected but leaves confirmation_code
-            displaced = session.get(Booking, bid)
-            if displaced is not None:
-                displaced.status = "rejected"
-                displaced.confirmation_code = None
-                session.add(displaced)
+            capacity = CapacityGuard().check(
+                incoming=incoming,
+                existing=[],
+                room=room,
+            )
+            if not capacity["allowed"]:
+                return {
+                    "ok": False,
+                    "error": capacity["reason"],
+                    "verdict": verdict,
+                }
 
-        # DEFECT: new requests go straight to accepted (skip pending coordinator review)
-        status = "accepted"
-        code = f"CONF-{uuid4().hex[:8].upper()}"
         booking = Booking(
             lecturer_id=lecturer_id,
             room_id=room_id,
@@ -172,9 +189,9 @@ def request_booking(
             start_time=start_time,
             end_time=end_time,
             resources=resources or "",
-            status=status,
-            override_used=1 if verdict.get("override_used") else 0,
-            confirmation_code=code,
+            status="pending",
+            override_used=0,
+            confirmation_code=None,
             created_at=incoming["created_at"],
         )
         session.add(booking)
@@ -187,67 +204,147 @@ def coordinator_override_accept(
     coordinator_id: int,
     booking_id: int,
     override_justification: str | None = None,
+    *,
+    coordinator_override: bool = False,
 ) -> dict[str, Any]:
-    """Force-accept a booking, using the same flawed resolver for displace."""
+    """Re-evaluate and accept a pending booking under coordinator authorization."""
     user = get_user(coordinator_id)
     if not user or user["role"] not in {"coordinator", "admin"}:
         return {"ok": False, "error": "coordinator/admin only"}
 
-    with Session(default_engine) as session:
-        booking_row = session.get(Booking, booking_id)
-        if booking_row is None:
-            return {"ok": False, "error": "booking not found"}
-        booking = booking_row.model_dump()
+    with _approval_lock:
+        with Session(default_engine) as session:
+            if session.bind.dialect.name == "sqlite":
+                session.exec(text("BEGIN IMMEDIATE"))
 
-        room = _dict(session.get(Room, booking["room_id"]))
-        existing = [
-            b.model_dump()
-            for b in session.exec(
-                select(Booking).where(
-                    Booking.room_id == booking["room_id"],
-                    Booking.preferred_date == booking["preferred_date"],
-                    Booking.id != booking_id,
+            booking_row = session.get(Booking, booking_id)
+            if booking_row is None:
+                session.rollback()
+                return {"ok": False, "error": "booking not found"}
+
+            room_id = booking_row.room_id
+            if session.bind.dialect.name == "postgresql":
+                room_row = session.exec(
+                    select(Room).where(Room.id == room_id).with_for_update()
+                ).first()
+            else:
+                room_row = session.get(Room, room_id)
+
+            room = _dict(room_row)
+
+            session.refresh(booking_row)
+            if booking_row.status != "pending":
+                session.rollback()
+                return {"ok": False, "error": "booking is not pending"}
+
+            booking = booking_row.model_dump()
+            existing = [
+                b.model_dump()
+                for b in session.exec(
+                    select(Booking).where(
+                        Booking.room_id == booking["room_id"],
+                        Booking.preferred_date == booking["preferred_date"],
+                        Booking.id != booking_id,
+                    )
+                ).all()
+            ]
+
+            existing = [
+                other for other in existing
+                if other["status"] in {"accepted", "pending"}
+                and _times_overlap(
+                    other["start_time"],
+                    other["end_time"],
+                    booking["start_time"],
+                    booking["end_time"],
                 )
-            ).all()
-        ]
-
-        existing = [
-            other for other in existing
-            if other["status"] in {"accepted", "pending"}
-            and _times_overlap(
-                other["start_time"],
-                other["end_time"],
-                booking["start_time"],
-                booking["end_time"],
+            ]
+            verdict = resolve_slot_request(
+                incoming=booking,
+                existing=existing,
+                room=room,
+                coordinator_override=coordinator_override,
+                override_justification=override_justification,
             )
-        ]
-        verdict = resolve_slot_request(
-            incoming=booking,
-            existing=existing,
-            room=room,
-            coordinator_override=True,
-            override_justification=override_justification,
-        )
-        if verdict["decision"] == "reject":
+
+            if verdict["decision"] == "reject":
+                session.rollback()
+                return {"ok": False, "error": verdict["reason"], "verdict": verdict}
+
+            for bid in verdict.get("displace_ids") or []:
+                displaced = session.get(Booking, bid)
+                if displaced is not None:
+                    displaced.status = "rejected"
+                    displaced.confirmation_code = None
+                    session.add(displaced)
+
+            code = f"CONF-{uuid4().hex[:8].upper()}"
+            booking_row.status = "accepted"
+            booking_row.override_used = (
+                1 if verdict.get("override_used") is True else 0
+            )
+            booking_row.confirmation_code = code
+            session.add(booking_row)
+            session.commit()
+            session.refresh(booking_row)
             return {
-                "ok": False,
-                "error": verdict["reason"],
+                "ok": True,
+                "booking": booking_row.model_dump(),
                 "verdict": verdict,
             }
-        for bid in verdict.get("displace_ids") or []:
-            displaced = session.get(Booking, bid)
-            if displaced is not None:
-                displaced.status = "rejected"
-                displaced.confirmation_code = None
-                session.add(displaced)
-        code = booking.get("confirmation_code") or f"CONF-{uuid4().hex[:8].upper()}"
-        booking_row.status = "accepted"
-        booking_row.override_used = 1
-        booking_row.confirmation_code = code
-        session.add(booking_row)
-        session.commit()
-        session.refresh(booking_row)
-        return {"ok": True, "booking": booking_row.model_dump(), "verdict": verdict}
+
+
+def coordinator_reject(
+    coordinator_id: int,
+    booking_id: int,
+) -> dict[str, Any]:
+
+    """Reject a pending booking under coordinator authorization."""
+
+    # Verify that the user is authorized to reject bookings.
+    user = get_user(coordinator_id)
+
+    if not user or user["role"] not in {"coordinator", "admin"}:
+        return {"ok": False, "error": "coordinator/admin only"}
+
+    # Use the same locking mechanism as the approval process.
+    with _approval_lock:
+        with Session(default_engine) as session:
+            if session.bind.dialect.name == "sqlite":
+                session.exec(text("BEGIN IMMEDIATE"))
+
+            booking = session.get(Booking, booking_id)
+
+            # Check whether the booking exists.
+            if booking is None:
+                session.rollback()
+                return {"ok": False, "error": "booking not found"}
+
+            # Lock the room to prevent concurrent approval and rejection.
+            if session.bind.dialect.name == "postgresql":
+                session.exec(
+                    select(Room)
+                    .where(Room.id == booking.room_id)
+                    .with_for_update()
+                ).first()
+
+            session.refresh(booking)
+
+            # Only pending bookings can be rejected.
+            if booking.status != "pending":
+                session.rollback()
+                return {"ok": False, "error": "booking is not pending"}
+
+            # Reject the booking and invalidate its confirmation.
+            booking.status = "rejected"
+            booking.confirmation_code = None
+
+            # Save the updated booking.
+            session.add(booking)
+            session.commit()
+            session.refresh(booking)
+
+            return {"ok": True, "booking": booking.model_dump()}
 
 
 def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
@@ -263,7 +360,7 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
         if user["role"] not in {"lecturer", "coordinator", "admin"}:
             return {"ok": False, "error": "forbidden"}
 
-        # DEFECT: cancel sets status but confirmation_code remains usable 
+        # DEFECT: cancel sets status but confirmation_code remains usable
         # Check whether the workshop has already started.
         workshop_start = datetime.strptime(
             f"{booking.preferred_date} {booking.start_time}",

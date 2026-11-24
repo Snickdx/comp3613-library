@@ -190,6 +190,7 @@ def override_accept(
         int(current_user["id"]),
         booking_id,
         override_justification=body.override_justification,
+        coordinator_override=True,
     )
     if not result.get("ok"):
         _raise_service_error(result)
