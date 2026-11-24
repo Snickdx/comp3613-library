@@ -185,7 +185,9 @@ def request_booking(
 
 
 def coordinator_override_accept(
-    coordinator_id: int, booking_id: int
+    coordinator_id: int,
+    booking_id: int,
+    override_justification: str | None = None,
 ) -> dict[str, Any]:
     """Force-accept a booking, using the same flawed resolver for displace."""
     user = get_user(coordinator_id)
@@ -225,7 +227,14 @@ def coordinator_override_accept(
             existing=existing,
             room=room,
             coordinator_override=True,
+            override_justification=override_justification,
         )
+        if verdict["decision"] == "reject":
+            return {
+                "ok": False,
+                "error": verdict["reason"],
+                "verdict": verdict,
+            }
         for bid in verdict.get("displace_ids") or []:
             displaced = session.get(Booking, bid)
             if displaced is not None:
