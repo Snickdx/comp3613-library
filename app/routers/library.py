@@ -5,10 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 from app.services import bookings
 from app.services import library_auth as auth
+from app.services import rooms as room_service
 
 router = APIRouter(tags=["library"])
 
@@ -26,6 +34,47 @@ class BookingBody(BaseModel):
     start_time: str = Field(description="Workshop start time, HH:MM")
     end_time: str = Field(description="Workshop end time, HH:MM")
     resources: str = ""
+
+class OverrideAcceptBody(BaseModel):
+    override_justification: str = Field(min_length=1)
+
+
+class RoomUpdateBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    capacity: StrictInt | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str:
+        if value is None or not value.strip():
+            raise ValueError("name must be a non-empty string")
+        return value.strip()
+
+    @field_validator("capacity")
+    @classmethod
+    def validate_capacity(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError("capacity must be a positive integer or null")
+        return value
+
+    @model_validator(mode="after")
+    def require_room_fields(self) -> RoomUpdateBody:
+        if not self.model_fields_set:
+            raise ValueError("at least one room field is required")
+        return self
+
+
+def _require_admin(
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
+) -> dict[str, Any]:
+    if current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="administrator access required",
+        )
+    return current_user
 
 
 def _raise_service_error(result: dict[str, Any]) -> None:
@@ -56,6 +105,44 @@ def login(body: LoginBody) -> dict[str, Any]:
 @router.get("/rooms")
 def rooms() -> dict[str, Any]:
     return {"rooms": bookings.list_rooms()}
+
+
+@router.get("/admin/rooms")
+def admin_rooms(
+    current_admin: dict[str, Any] = Depends(_require_admin),
+) -> dict[str, Any]:
+    return {"rooms": room_service.list_rooms()}
+
+
+@router.get("/admin/rooms/{room_id}")
+def admin_room(
+    room_id: int,
+    current_admin: dict[str, Any] = Depends(_require_admin),
+) -> dict[str, Any]:
+    room = room_service.get_room(room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="room not found")
+    return {"room": room}
+
+
+@router.patch("/admin/rooms/{room_id}")
+def update_admin_room(
+    room_id: int,
+    body: RoomUpdateBody,
+    current_admin: dict[str, Any] = Depends(_require_admin),
+) -> dict[str, Any]:
+    result = room_service.update_room(
+        room_id,
+        body.model_dump(exclude_unset=True),
+    )
+    if not result.get("ok"):
+        error = result.get("error", "room update failed")
+        status_code = {
+            "room not found": 404,
+            "room name already exists": 409,
+        }.get(error, 422)
+        raise HTTPException(status_code=status_code, detail=error)
+    return result
 
 
 @router.get("/bookings")
@@ -90,8 +177,7 @@ def create_booking(
 def override_accept(
     booking_id: int,
     body: OverrideAcceptBody,
-   
-    current_user: dict[str, Any] = Depends(auth.get_current_api_user),,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
 ) -> dict[str, Any]:
     if current_user["role"] not in {"coordinator", "admin"}:
         raise HTTPException(
@@ -100,10 +186,8 @@ def override_accept(
         )
 
     result = bookings.coordinator_override_accept(
-        
         int(current_user["id"]),
-        booking_id
-    ,
+        booking_id,
         override_justification=body.override_justification,
         coordinator_override=True,
     )

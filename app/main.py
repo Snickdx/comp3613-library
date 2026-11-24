@@ -60,7 +60,7 @@ async def health():
 
 
 @app.exception_handler(status.HTTP_401_UNAUTHORIZED)
-async def unauthorized_redirect_handler(request: Request, exc: HTTPException):
+def unauthorized_redirect_handler(request: Request, exc: HTTPException):
     if request.url.path.startswith("/api/"):
         return JSONResponse(
             status_code=exc.status_code,

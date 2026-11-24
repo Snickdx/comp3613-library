@@ -29,6 +29,17 @@ Open http://127.0.0.1:5000 — SSR auth shell; scenario JSON under `/api` and Op
 
 JSON login: `POST /api/auth/login` with `{"email","password"}`. The response includes a bearer access token; send it as `Authorization: Bearer <access_token>` when creating, cancelling, or overriding bookings. The API derives the caller's identity from the signed token, not from a user ID supplied by the client.
 
+## Administrator room management
+
+Log in as an administrator using `POST /api/auth/login`. Send the returned
+access token as `Authorization: Bearer <access_token>` for:
+
+- `GET /api/admin/rooms` — list room configurations and effective capacities.
+- `GET /api/admin/rooms/{room_id}` — view one room.
+- `PATCH /api/admin/rooms/{room_id}` — update a room name and/or capacity.
+
+Capacity must be a positive integer. Set it to `null` to use the default capacity of 30. The public `GET /api/rooms` endpoint remains available for room browsing.
+
 ## Student brief
 
 See [`ASSIGNMENT.md`](ASSIGNMENT.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md).

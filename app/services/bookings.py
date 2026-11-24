@@ -16,6 +16,7 @@ from app.models.room import Room
 from app.services.capacity_guard import CapacityGuard
 from app.services.conflicts import resolve_slot_request
 from app.services.library_auth import get_user
+from app.services.rooms import list_rooms as list_room_configurations
 
 
 _approval_lock = RLock()
@@ -57,9 +58,7 @@ def _dict(row: Booking | Room | None) -> dict[str, Any] | None:
 
 
 def list_rooms() -> list[dict[str, Any]]:
-    with Session(default_engine) as session:
-        rows = session.exec(select(Room).order_by(Room.id)).all()
-        return [r.model_dump() for r in rows]
+    return list_room_configurations()
 
 
 def list_bookings(

@@ -130,6 +130,9 @@ def test_non_coordinator_cannot_override_booking(monkeypatch, role):
     with pytest.raises(HTTPException) as exc_info:
         library_router.override_accept(
             booking_id=10,
+            body=library_router.OverrideAcceptBody(
+                override_justification="approved by coordinator",
+            ),
             current_user={"id": 42, "role": role},
         )
 
@@ -142,19 +145,28 @@ def test_coordinator_and_admin_can_request_override(monkeypatch, role):
     monkeypatch.setattr(
         library_router.bookings,
         "coordinator_override_accept",
-        lambda actor_id, booking_id: {
+        lambda actor_id, booking_id, override_justification: {
             "ok": True,
             "actor_id": actor_id,
             "booking_id": booking_id,
+            "override_justification": override_justification,
         },
     )
 
     result = library_router.override_accept(
         booking_id=10,
+        body=library_router.OverrideAcceptBody(
+            override_justification="approved by coordinator",
+        ),
         current_user={"id": 42, "role": role},
     )
 
-    assert result == {"ok": True, "actor_id": 42, "booking_id": 10}
+    assert result == {
+        "ok": True,
+        "actor_id": 42,
+        "booking_id": 10,
+        "override_justification": "approved by coordinator",
+    }
 
 
 def test_cancel_route_uses_authenticated_user_and_returns_forbidden(monkeypatch):
