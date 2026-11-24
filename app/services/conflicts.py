@@ -10,6 +10,7 @@ from app.services.conflict_strategy import (
     ConflictStrategy,
 )
 from app.services.first_come_first_served import FirstComeFirstServed
+from app.services.larger_cohort_override import LargerCohortOverride
 
 DEFAULT_CAPACITY = 30
 
@@ -24,12 +25,12 @@ def room_capacity(room: dict[str, Any] | None) -> int:
 
 
 class CoordinatorOverrideStrategy(ConflictStrategy):
-    """Adds justified larger-cohort overrides to first-come-first-served."""
+    """Apply FCFS first, then authorize larger-cohort overrides."""
 
     def __init__(self) -> None:
-        self.base_strategy = FirstComeFirstServed()
+        self.fcfs = FirstComeFirstServed()
+        self.larger_cohort = LargerCohortOverride()
 
-    
     def evaluate(
         self,
         *,
@@ -38,68 +39,45 @@ class CoordinatorOverrideStrategy(ConflictStrategy):
         coordinator_override: bool = False,
         override_justification: str | None = None,
     ) -> ConflictResult:
-
-        result = self.base_strategy.evaluate(
+        fcfs_result = self.fcfs.evaluate(
             incoming=incoming,
             existing=existing,
+            coordinator_override=coordinator_override,
+            override_justification=override_justification,
         )
 
-        # Preserve the existing ConflictResolver response wording.
-        if result.get("reason") == "existing booking submitted earlier":
-            result["reason"] = "earlier request wins"
+        if fcfs_result["decision"] == "accept":
+            return fcfs_result
 
-        result.setdefault("policy", "first-come-first-served")
+        if fcfs_result["reason"] not in {
+            "existing booking submitted earlier",
+            "existing booking has equal submission timestamp",
+        }:
+            return fcfs_result
 
-        active = [
-            booking for booking in existing
-            if booking.get("status") in {"accepted", "pending"}
-        ]
+        if not coordinator_override:
+            return {
+                "decision": "reject",
+                "reason": "earlier request wins",
+                "override_used": False,
+                "displace_ids": [],
+                "policy": "earlier-request-wins",
+            }
 
-        if not coordinator_override or not active:
-            return result
-
-        champion = min(
-            active,
-            key=lambda b: str(b.get("created_at") or ""),
+        return self.larger_cohort.evaluate(
+            incoming=incoming,
+            existing=existing,
+            coordinator_override=coordinator_override,
+            override_justification=override_justification,
         )
 
-        if int(incoming.get("headcount", 0)) <= int(
-            champion.get("headcount", 0)
-        ):
-            return result
 
-        if result["decision"] == "accept":
-            return result
-
-        if not override_justification or not override_justification.strip():
-            return {
-                "decision": "reject",
-                "reason": "override justification is required",
-                "override_used": False,
-                "displace_ids": [],
-            }
-
-        if not isinstance(champion.get("id"), int):
-            return {
-                "decision": "reject",
-                "reason": "existing booking has missing or invalid id",
-                "override_used": False,
-                "displace_ids": [],
-            }
-
-        return {
-            "decision": "accept",
-            "reason": "larger cohort coordinator override",
-            "override_used": True,
-            "displace_ids": [champion["id"]],
-            "override_justification": override_justification.strip(),
-        }
-
-
-# Backward compatibility with existing callers.
+# Compatibility aliases for existing callers.
 EarlierRequestWinsStrategy = CoordinatorOverrideStrategy
-EarlierRequestStrategy = CoordinatorOverrideStrategy
 FirstComeFirstServedStrategy = CoordinatorOverrideStrategy
+EarlierRequestStrategy = CoordinatorOverrideStrategy
+LargerCohortOverrideStrategy = LargerCohortOverride
+
 
 class ConflictResolver:
     """Context that applies a conflict strategy and room capacity policy."""
