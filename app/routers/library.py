@@ -29,7 +29,7 @@ class LoginBody(BaseModel):
 class BookingBody(BaseModel):
     room_id: int
     course_code: str = ""
-    headcount: int
+    headcount: StrictInt
     preferred_date: str = Field(description="ISO date YYYY-MM-DD")
     start_time: str = Field(description="Workshop start time, HH:MM")
     end_time: str = Field(description="Workshop end time, HH:MM")
@@ -172,6 +172,25 @@ def create_booking(
         _raise_service_error(result)
     return result
 
+@router.post("/bookings/{booking_id}/approve")
+def approve(
+    booking_id: int,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
+) -> dict[str, Any]:
+    if current_user["role"] not in {"coordinator", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail="coordinator or admin only",
+        )
+
+    result = bookings.coordinator_override_accept(
+        int(current_user["id"]),
+        booking_id,
+        coordinator_override=False,
+    )
+    if not result.get("ok"):
+        _raise_service_error(result)
+    return result
 
 @router.post("/bookings/{booking_id}/override-accept")
 def override_accept(
@@ -195,6 +214,24 @@ def override_accept(
         _raise_service_error(result)
     return result
 
+@router.post("/bookings/{booking_id}/reject")
+def reject(
+    booking_id: int,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
+) -> dict[str, Any]:
+    if current_user["role"] not in {"coordinator", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail="coordinator or admin only",
+        )
+
+    result = bookings.coordinator_reject(
+        int(current_user["id"]),
+        booking_id,
+    )
+    if not result.get("ok"):
+        _raise_service_error(result)
+    return result
 
 @router.post("/bookings/{booking_id}/cancel")
 def cancel(

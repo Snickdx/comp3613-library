@@ -145,12 +145,14 @@ def test_coordinator_and_admin_can_request_override(monkeypatch, role):
     monkeypatch.setattr(
         library_router.bookings,
         "coordinator_override_accept",
-        lambda actor_id, booking_id, override_justification: {
+        lambda actor_id, booking_id, override_justification, *, coordinator_override: {
             "ok": True,
             "actor_id": actor_id,
             "booking_id": booking_id,
             "override_justification": override_justification,
+            "coordinator_override": coordinator_override,
         },
+        
     )
 
     result = library_router.override_accept(
@@ -166,6 +168,7 @@ def test_coordinator_and_admin_can_request_override(monkeypatch, role):
         "actor_id": 42,
         "booking_id": 10,
         "override_justification": "approved by coordinator",
+        "coordinator_override": True,
     }
 
 

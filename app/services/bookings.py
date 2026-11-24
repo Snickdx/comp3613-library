@@ -104,6 +104,18 @@ def _dict(row: Booking | Room | None) -> dict[str, Any] | None:
 def list_rooms() -> list[dict[str, Any]]:
     return list_room_configurations()
 
+def list_bookings(
+    *, room_id: int | None = None, date: str | None = None
+) -> list[dict[str, Any]]:
+    with Session(default_engine) as session:
+        stmt = select(Booking)
+        if room_id is not None:
+            stmt = stmt.where(Booking.room_id == room_id)
+        if date is not None:
+            stmt = stmt.where(Booking.preferred_date == date)
+        stmt = stmt.order_by(Booking.id)
+        return [b.model_dump() for b in session.exec(stmt).all()]
+
 
 def list_conflict_decisions(
     *, booking_id: int | None = None
@@ -526,32 +538,60 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
     user = get_user(actor_id)
     if not user:
         return {"ok": False, "error": "unknown user"}
-    with Session(default_engine) as session:
-        booking = session.get(Booking, booking_id)
-        if booking is None:
-            return {"ok": False, "error": "booking not found"}
-        if user["role"] == "lecturer" and booking.lecturer_id != actor_id:
-            return {"ok": False, "error": "forbidden"}
-        if user["role"] not in {"lecturer", "coordinator", "admin"}:
-            return {"ok": False, "error": "forbidden"}
 
-        # DEFECT: cancel sets status but confirmation_code remains usable
-        # Check whether the workshop has already started.
-        workshop_start = datetime.strptime(
-            f"{booking.preferred_date} {booking.start_time}",
-            "%Y-%m-%d %H:%M",
-        )
+    # Use the same locking mechanism as approval and rejection.
+    with _approval_lock:
+        with Session(default_engine) as session:
+            if session.bind.dialect.name == "sqlite":
+                session.exec(text("BEGIN IMMEDIATE"))
 
-        if datetime.now() >= workshop_start:
-            return {"ok": False, "error": "workshop has already started"}
+            booking = session.get(Booking, booking_id)
 
-        # Cancel the booking and invalidate its confirmation.
-        booking.status = "cancelled"
-        booking.confirmation_code = None
-        session.add(booking)
-        session.commit()
-        session.refresh(booking)
-        return {"ok": True, "booking": booking.model_dump()}
+            if booking is None:
+                session.rollback()
+                return {"ok": False, "error": "booking not found"}
+
+            # Lock the room to prevent concurrent booking modifications.
+            if session.bind.dialect.name == "postgresql":
+                session.exec(
+                    select(Room)
+                    .where(Room.id == booking.room_id)
+                    .with_for_update()
+                ).first()
+
+            session.refresh(booking)
+
+            if user["role"] == "lecturer" and booking.lecturer_id != actor_id:
+                session.rollback()
+                return {"ok": False, "error": "forbidden"}
+
+            if user["role"] not in {"lecturer", "coordinator", "admin"}:
+                session.rollback()
+                return {"ok": False, "error": "forbidden"}
+
+            # Only pending and accepted bookings can be cancelled.
+            if booking.status not in {"pending", "accepted"}:
+                session.rollback()
+                return {"ok": False, "error": "booking cannot be cancelled"}
+
+            # DEFECT: cancel sets status but confirmation_code remains usable
+            # Check whether the workshop has already started.
+            workshop_start = datetime.strptime(
+                f"{booking.preferred_date} {booking.start_time}",
+                "%Y-%m-%d %H:%M",
+            )
+
+            if datetime.now() >= workshop_start:
+                session.rollback()
+                return {"ok": False, "error": "workshop has already started"}
+
+            # Cancel the booking and invalidate its confirmation.
+            booking.status = "cancelled"
+            booking.confirmation_code = None
+            session.add(booking)
+            session.commit()
+            session.refresh(booking)
+            return {"ok": True, "booking": booking.model_dump()}
 
 
 def get_confirmation(code: str) -> dict[str, Any]:

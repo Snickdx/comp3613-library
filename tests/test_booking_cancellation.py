@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import pytest
 from sqlmodel import Session
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 from app.models.booking import Booking
 from app.models.room import Room
 from app.services import bookings
@@ -208,3 +211,191 @@ def test_unauthorized_cancellation(cancellation_setup):
 
     assert result["ok"] is False
     assert result["error"] == "forbidden"
+
+# Verify that an already cancelled booking cannot be cancelled again.
+def test_repeated_cancellation(cancellation_setup):
+
+    booking_id = cancellation_setup["id"]
+
+    first = bookings.cancel_booking(1, booking_id)
+    second = bookings.cancel_booking(1, booking_id)
+
+    assert first["ok"] is True
+    assert second["ok"] is False
+    assert second["error"] == "booking cannot be cancelled"
+
+# Verify that a rejected booking cannot be cancelled.
+def test_rejected_booking_cannot_be_cancelled(
+    test_engine, cancellation_setup
+):
+
+    booking_id = cancellation_setup["id"]
+
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+        booking.status = "rejected"
+        booking.confirmation_code = None
+        session.add(booking)
+        session.commit()
+
+    result = bookings.cancel_booking(1, booking_id)
+
+    assert result["ok"] is False
+    assert result["error"] == "booking cannot be cancelled"
+
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+        assert booking.status == "rejected"
+
+# Verify that cancelled bookings cannot be approved or rejected.
+@pytest.mark.parametrize("operation", ["approve", "reject"])
+def test_cancelled_booking_cannot_be_processed(
+    cancellation_setup, monkeypatch, operation
+):
+
+    monkeypatch.setattr(
+        bookings,
+        "get_user",
+        lambda actor_id: {
+            "role": "lecturer" if actor_id == 1 else "coordinator"
+        },
+    )
+
+    booking_id = cancellation_setup["id"]
+
+    cancelled = bookings.cancel_booking(1, booking_id)
+
+    assert cancelled["ok"] is True
+
+    if operation == "approve":
+        result = bookings.coordinator_override_accept(
+            2, booking_id
+        )
+    else:
+        result = bookings.coordinator_reject(
+            2, booking_id
+        )
+
+    assert result["ok"] is False
+    assert result["error"] == "booking is not pending"
+
+# Verify that concurrent approval and cancellation remain consistent.
+def test_concurrent_approval_and_cancellation(
+    test_engine, cancellation_setup, monkeypatch
+):
+
+    monkeypatch.setattr(
+        bookings,
+        "get_user",
+        lambda actor_id: {
+            "role": "lecturer" if actor_id == 1 else "coordinator"
+        },
+    )
+
+    booking_id = cancellation_setup["id"]
+
+    # Prepare a pending booking.
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+        booking.status = "pending"
+        booking.confirmation_code = None
+        session.add(booking)
+        session.commit()
+
+    barrier = Barrier(2, timeout=5)
+
+    def approve():
+
+        barrier.wait()
+        return bookings.coordinator_override_accept(
+            2, booking_id
+        )
+
+    def cancel():
+
+        barrier.wait()
+        return bookings.cancel_booking(1, booking_id)
+
+    # Execute both operations concurrently.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        approval_future = executor.submit(approve)
+        cancellation_future = executor.submit(cancel)
+
+        approval = approval_future.result(timeout=10)
+        cancellation = cancellation_future.result(timeout=10)
+
+    assert cancellation["ok"] is True
+
+    # Verify that the final booking state is consistent.
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+
+        assert booking.status == "cancelled"
+        assert booking.confirmation_code is None
+
+    # Any confirmation generated before cancellation must be invalid.
+    if approval["ok"]:
+        code = approval["booking"]["confirmation_code"]
+        assert bookings.get_confirmation(code)["ok"] is False
+    else:
+        assert approval["error"] == "booking is not pending"
+
+# Verify that concurrent rejection and cancellation cannot both succeed.
+def test_concurrent_rejection_and_cancellation(
+    test_engine, cancellation_setup, monkeypatch
+):
+
+    monkeypatch.setattr(
+        bookings,
+        "get_user",
+        lambda actor_id: {
+            "role": "lecturer" if actor_id == 1 else "coordinator"
+        },
+    )
+
+    booking_id = cancellation_setup["id"]
+
+    # Prepare a pending booking.
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+        booking.status = "pending"
+        booking.confirmation_code = None
+        session.add(booking)
+        session.commit()
+
+    barrier = Barrier(2, timeout=5)
+
+    def reject():
+
+        barrier.wait()
+        return bookings.coordinator_reject(
+            2, booking_id
+        )
+
+    def cancel():
+
+        barrier.wait()
+        return bookings.cancel_booking(1, booking_id)
+
+    # Execute both operations concurrently.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        rejection_future = executor.submit(reject)
+        cancellation_future = executor.submit(cancel)
+
+        rejection = rejection_future.result(timeout=10)
+        cancellation = cancellation_future.result(timeout=10)
+
+    # Exactly one operation should succeed.
+    assert rejection["ok"] != cancellation["ok"]
+
+    with Session(test_engine) as session:
+        booking = session.get(Booking, booking_id)
+
+        if rejection["ok"]:
+            assert booking.status == "rejected"
+            assert cancellation["error"] == "booking cannot be cancelled"
+        else:
+            assert booking.status == "cancelled"
+            assert rejection["error"] == "booking is not pending"
+
+        assert booking.confirmation_code is None
