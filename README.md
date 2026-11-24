@@ -27,7 +27,7 @@ Open http://127.0.0.1:5000 — SSR auth shell; scenario JSON under `/api` and Op
 | `lecturer1@example.com` | `lect-dev` | lecturer |
 | `lecturer2@example.com` | `lect-dev` | lecturer |
 
-JSON login: `POST /api/auth/login` with `{"email","password"}`. Booking endpoints identify the actor with an `X-User-Id` header (demo auth).
+JSON login: `POST /api/auth/login` with `{"email","password"}`. The response includes a bearer access token; send it as `Authorization: Bearer <access_token>` when creating, cancelling, or overriding bookings. The API derives the caller's identity from the signed token, not from a user ID supplied by the client.
 
 ## Student brief
 
