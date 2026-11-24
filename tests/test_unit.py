@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from app.services.capacity_guard import CapacityGuard
 
 import jwt
 
@@ -69,3 +70,71 @@ def test_access_token_contains_subject_and_role():
     assert payload["sub"] == "7"
     assert payload["role"] == "admin"
     assert "exp" in payload
+
+
+#capacity guard tests
+
+def test_capacity_guard_allows_booking_within_capacity():
+    guard = CapacityGuard()
+
+    result = guard.check(
+        incoming={"headcount": 10},
+        existing=[
+            {"headcount": 10, "status": "accepted"}
+        ],
+        room={"capacity": 30},
+    )
+
+    assert result["allowed"] is True
+    assert result["total"] == 20
+
+
+def test_capacity_guard_rejects_booking_exceeding_capacity():
+    guard = CapacityGuard()
+
+    result = guard.check(
+        incoming={"headcount": 15},
+        existing=[
+            {"headcount": 20, "status": "accepted"}
+        ],
+        room={"capacity": 30},
+    )
+
+    assert result["allowed"] is False
+    assert result["total"] == 35
+
+
+def test_capacity_guard_counts_multiple_existing_bookings():
+    guard = CapacityGuard()
+
+    result = guard.check(
+        incoming={"headcount": 10},
+        existing=[
+            {"headcount": 15, "status": "accepted"},
+            {"headcount": 10, "status": "pending"},
+        ],
+        room={"capacity": 30},
+    )
+
+    assert result["allowed"] is False
+    assert result["occupied"] == 25
+    assert result["total"] == 35
+
+
+def test_capacity_guard_ignores_cancelled_and_rejected_bookings():
+    guard = CapacityGuard()
+
+    result = guard.check(
+        incoming={"headcount": 10},
+        existing=[
+            {"headcount": 20, "status": "cancelled"},
+            {"headcount": 15, "status": "rejected"},
+            {"headcount": 10, "status": "accepted"},
+        ],
+        room={"capacity": 30},
+    )
+
+    assert result["allowed"] is True
+    assert result["occupied"] == 10
+    assert result["total"] == 20
+
