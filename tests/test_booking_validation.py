@@ -117,7 +117,7 @@ def test_invalid_booking_not_saved(validation_setup, test_engine):
         assert len(rows) == 0
 
 
-# Verify that a valid booking request is accepted by the service.
+# Verify that a valid booking request remains pending for coordinator review.
 def test_valid_booking_request(validation_setup):
 
     result = bookings.request_booking(1, **validation_setup)
@@ -127,3 +127,5 @@ def test_valid_booking_request(validation_setup):
     assert result["booking"]["headcount"] == 20
     assert result["booking"]["preferred_date"] == "2099-12-01"
     assert result["booking"]["resources"] == "Projector"
+    assert result["booking"]["status"] == "pending"
+    assert result["booking"]["confirmation_code"] is None

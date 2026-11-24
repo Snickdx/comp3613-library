@@ -89,7 +89,9 @@ def create_booking(
 @router.post("/bookings/{booking_id}/override-accept")
 def override_accept(
     booking_id: int,
-    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
+    body: OverrideAcceptBody,
+   
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),,
 ) -> dict[str, Any]:
     if current_user["role"] not in {"coordinator", "admin"}:
         raise HTTPException(
@@ -98,7 +100,12 @@ def override_accept(
         )
 
     result = bookings.coordinator_override_accept(
-        int(current_user["id"]), booking_id
+        
+        int(current_user["id"]),
+        booking_id
+    ,
+        override_justification=body.override_justification,
+        coordinator_override=True,
     )
     if not result.get("ok"):
         _raise_service_error(result)
