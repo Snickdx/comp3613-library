@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlmodel import Session, select
 
-from app.database import engine
+from app.database import engine as default_engine
 from app.models.booking import Booking
 from app.models.room import Room
 from app.services.conflicts import resolve_slot_request
@@ -19,6 +19,31 @@ def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _valid_time_range(start_time: str, end_time: str) -> bool:
+    """Check that times use HH:MM format and end is after start."""
+    try:
+        start = datetime.strptime(start_time, "%H:%M")
+        end = datetime.strptime(end_time, "%H:%M")
+    except (TypeError, ValueError):
+        return False
+
+    return (
+        start.strftime("%H:%M") == start_time
+        and end.strftime("%H:%M") == end_time
+        and start < end
+    )
+
+
+def _times_overlap(
+    existing_start: str,
+    existing_end: str,
+    new_start: str,
+    new_end: str,
+) -> bool:
+    """Return True if two workshop time ranges overlap."""
+    return existing_start < new_end and new_start < existing_end
+
+
 def _dict(row: Booking | Room | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -26,7 +51,7 @@ def _dict(row: Booking | Room | None) -> dict[str, Any] | None:
 
 
 def list_rooms() -> list[dict[str, Any]]:
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         rows = session.exec(select(Room).order_by(Room.id)).all()
         return [r.model_dump() for r in rows]
 
@@ -34,7 +59,7 @@ def list_rooms() -> list[dict[str, Any]]:
 def list_bookings(
     *, room_id: int | None = None, date: str | None = None
 ) -> list[dict[str, Any]]:
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         stmt = select(Booking)
         if room_id is not None:
             stmt = stmt.where(Booking.room_id == room_id)
@@ -51,6 +76,8 @@ def request_booking(
     course_code: str,
     headcount: int,
     preferred_date: str,
+    start_time: str,
+    end_time: str,
     resources: str,
 ) -> dict[str, Any]:
     user = get_user(lecturer_id)
@@ -60,8 +87,10 @@ def request_booking(
     # DEFECT: incomplete validation — empty resources / missing course allowed
     if headcount <= 0:
         return {"ok": False, "error": "headcount must be positive"}
+    if not _valid_time_range(start_time, end_time):
+        return {"ok": False, "error": "invalid workshop time range"}
 
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         room_row = session.get(Room, room_id)
         room = _dict(room_row)
         if room is None:
@@ -77,12 +106,25 @@ def request_booking(
             ).all()
         ]
 
+        existing = [
+            booking for booking in existing
+            if booking["status"] in {"accepted", "pending"}
+            and _times_overlap(
+                booking["start_time"],
+                booking["end_time"],
+                start_time,
+                end_time,
+            )
+        ]
+
         incoming = {
             "lecturer_id": lecturer_id,
             "room_id": room_id,
             "course_code": course_code,
             "headcount": headcount,
             "preferred_date": preferred_date,
+            "start_time": start_time,
+            "end_time": end_time,
             "resources": resources,
             "created_at": _now(),
         }
@@ -112,6 +154,8 @@ def request_booking(
             course_code=course_code or "",
             headcount=headcount,
             preferred_date=preferred_date,
+            start_time=start_time,
+            end_time=end_time,
             resources=resources or "",
             status=status,
             override_used=1 if verdict.get("override_used") else 0,
@@ -132,7 +176,7 @@ def coordinator_override_accept(
     if not user or user["role"] not in {"coordinator", "admin"}:
         return {"ok": False, "error": "coordinator/admin only"}
 
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         booking_row = session.get(Booking, booking_id)
         if booking_row is None:
             return {"ok": False, "error": "booking not found"}
@@ -148,6 +192,17 @@ def coordinator_override_accept(
                     Booking.id != booking_id,
                 )
             ).all()
+        ]
+
+        existing = [
+            other for other in existing
+            if other["status"] in {"accepted", "pending"}
+            and _times_overlap(
+                other["start_time"],
+                other["end_time"],
+                booking["start_time"],
+                booking["end_time"],
+            )
         ]
         verdict = resolve_slot_request(
             incoming=booking,
@@ -174,7 +229,7 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
     user = get_user(actor_id)
     if not user:
         return {"ok": False, "error": "unknown user"}
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         booking = session.get(Booking, booking_id)
         if booking is None:
             return {"ok": False, "error": "booking not found"}
@@ -192,7 +247,7 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
 
 
 def get_confirmation(code: str) -> dict[str, Any]:
-    with Session(engine) as session:
+    with Session(default_engine) as session:
         row = session.exec(
             select(Booking).where(Booking.confirmation_code == code)
         ).first()

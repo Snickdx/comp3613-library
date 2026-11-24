@@ -10,6 +10,8 @@ class Booking(SQLModel, table=True):
     course_code: str
     headcount: int
     preferred_date: str = Field(index=True)
+    start_time: str = Field(description="Workshop start time, HH:MM")
+    end_time: str = Field(description="Workshop end time, HH:MM")
     resources: str
     status: str
     override_used: int = 0

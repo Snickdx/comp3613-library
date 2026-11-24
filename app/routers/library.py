@@ -23,6 +23,8 @@ class BookingBody(BaseModel):
     course_code: str = ""
     headcount: int
     preferred_date: str = Field(description="ISO date YYYY-MM-DD")
+    start_time: str = Field(description="Workshop start time, HH:MM")
+    end_time: str = Field(description="Workshop end time, HH:MM")
     resources: str = ""
 
 
@@ -63,6 +65,8 @@ def create_booking(
         course_code=body.course_code,
         headcount=body.headcount,
         preferred_date=body.preferred_date,
+        start_time=body.start_time,
+        end_time=body.end_time,
         resources=body.resources,
     )
     if not result.get("ok"):
