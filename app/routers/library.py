@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.services import bookings
@@ -28,13 +28,17 @@ class BookingBody(BaseModel):
     resources: str = ""
 
 
-def _actor_id(x_user_id: str | None) -> int:
-    if not x_user_id:
-        raise HTTPException(status_code=401, detail="X-User-Id header required")
-    try:
-        return int(x_user_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="X-User-Id must be int") from exc
+def _raise_service_error(result: dict[str, Any]) -> None:
+    error = result.get("error", "booking request failed")
+    status_code = {
+        "forbidden": 403,
+        "coordinator/admin only": 403,
+        "lecturers only": 403,
+        "unknown user": 401,
+        "booking not found": 404,
+        "room not found": 404,
+    }.get(error, 400)
+    raise HTTPException(status_code=status_code, detail=error)
 
 
 @router.post("/auth/login")
@@ -42,7 +46,11 @@ def login(body: LoginBody) -> dict[str, Any]:
     user = auth.login(body.email, body.password)
     if not user:
         raise HTTPException(status_code=401, detail="invalid credentials")
-    return {"user": user}
+    return {
+        "user": user,
+        "access_token": auth.issue_api_access_token(user),
+        "token_type": "bearer",
+    }
 
 
 @router.get("/rooms")
@@ -57,10 +65,14 @@ def list_all(room_id: int | None = None, date: str | None = None) -> dict[str, A
 
 @router.post("/bookings")
 def create_booking(
-    body: BookingBody, x_user_id: str | None = Header(default=None)
+    body: BookingBody,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
 ) -> dict[str, Any]:
+    if current_user["role"] != "lecturer":
+        raise HTTPException(status_code=403, detail="lecturers only")
+
     result = bookings.request_booking(
-        _actor_id(x_user_id),
+        int(current_user["id"]),
         room_id=body.room_id,
         course_code=body.course_code,
         headcount=body.headcount,
@@ -70,27 +82,37 @@ def create_booking(
         resources=body.resources,
     )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        _raise_service_error(result)
     return result
 
 
 @router.post("/bookings/{booking_id}/override-accept")
 def override_accept(
-    booking_id: int, x_user_id: str | None = Header(default=None)
+    booking_id: int,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
 ) -> dict[str, Any]:
-    result = bookings.coordinator_override_accept(_actor_id(x_user_id), booking_id)
+    if current_user["role"] not in {"coordinator", "admin"}:
+        raise HTTPException(
+            status_code=403,
+            detail="coordinator or admin only",
+        )
+
+    result = bookings.coordinator_override_accept(
+        int(current_user["id"]), booking_id
+    )
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        _raise_service_error(result)
     return result
 
 
 @router.post("/bookings/{booking_id}/cancel")
 def cancel(
-    booking_id: int, x_user_id: str | None = Header(default=None)
+    booking_id: int,
+    current_user: dict[str, Any] = Depends(auth.get_current_api_user),
 ) -> dict[str, Any]:
-    result = bookings.cancel_booking(_actor_id(x_user_id), booking_id)
+    result = bookings.cancel_booking(int(current_user["id"]), booking_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error"))
+        _raise_service_error(result)
     return result
 
 
