@@ -295,6 +295,59 @@ def coordinator_override_accept(
             }
 
 
+def coordinator_reject(
+    coordinator_id: int,
+    booking_id: int,
+) -> dict[str, Any]:
+
+    """Reject a pending booking under coordinator authorization."""
+
+    # Verify that the user is authorized to reject bookings.
+    user = get_user(coordinator_id)
+
+    if not user or user["role"] not in {"coordinator", "admin"}:
+        return {"ok": False, "error": "coordinator/admin only"}
+
+    # Use the same locking mechanism as the approval process.
+    with _approval_lock:
+        with Session(default_engine) as session:
+            if session.bind.dialect.name == "sqlite":
+                session.exec(text("BEGIN IMMEDIATE"))
+
+            booking = session.get(Booking, booking_id)
+
+            # Check whether the booking exists.
+            if booking is None:
+                session.rollback()
+                return {"ok": False, "error": "booking not found"}
+
+            # Lock the room to prevent concurrent approval and rejection.
+            if session.bind.dialect.name == "postgresql":
+                session.exec(
+                    select(Room)
+                    .where(Room.id == booking.room_id)
+                    .with_for_update()
+                ).first()
+
+            session.refresh(booking)
+
+            # Only pending bookings can be rejected.
+            if booking.status != "pending":
+                session.rollback()
+                return {"ok": False, "error": "booking is not pending"}
+
+            # Reject the booking and invalidate its confirmation.
+            booking.status = "rejected"
+            booking.confirmation_code = None
+
+            # Save the updated booking.
+            session.add(booking)
+            session.commit()
+            session.refresh(booking)
+
+            return {"ok": True, "booking": booking.model_dump()}
+
+
 def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
     user = get_user(actor_id)
     if not user:
@@ -308,7 +361,7 @@ def cancel_booking(actor_id: int, booking_id: int) -> dict[str, Any]:
         if user["role"] not in {"lecturer", "coordinator", "admin"}:
             return {"ok": False, "error": "forbidden"}
 
-        # DEFECT: cancel sets status but confirmation_code remains usable 
+        # DEFECT: cancel sets status but confirmation_code remains usable
         # Check whether the workshop has already started.
         workshop_start = datetime.strptime(
             f"{booking.preferred_date} {booking.start_time}",
