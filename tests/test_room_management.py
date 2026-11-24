@@ -1,17 +1,17 @@
 import json
+from typing import Any
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from pydantic import ValidationError
 from sqlmodel import Session
 from starlette.requests import Request
 
-from app.dependencies.auth import is_admin_dep
 from app.main import unauthorized_redirect_handler
 from app.models.room import Room
-from app.models.user import User
 from app.routers.library import (
     RoomUpdateBody,
+    _require_admin,
     admin_room,
     admin_rooms,
     router,
@@ -34,13 +34,8 @@ def _create_room(
         return room
 
 
-def _admin_user(role: str = "admin") -> User:
-    return User(
-        username=f"{role}-user",
-        email=f"{role}@example.com",
-        password="hashed-password",
-        role=role,
-    )
+def _admin_user(role: str = "admin") -> dict[str, Any]:
+    return {"id": 1, "role": role}
 
 
 def test_admin_room_listing_exposes_effective_default_capacity(
@@ -141,9 +136,9 @@ def test_only_administrators_pass_the_room_management_role_check():
     admin = _admin_user("admin")
     lecturer = _admin_user("lecturer")
 
-    assert is_admin_dep(admin) is admin
+    assert _require_admin(admin) is admin
     with pytest.raises(HTTPException) as exc_info:
-        is_admin_dep(lecturer)
+        _require_admin(lecturer)
 
     assert exc_info.value.status_code == 403
 
@@ -158,11 +153,17 @@ def test_all_admin_room_routes_use_admin_dependency():
     assert len(admin_routes) == 3
     assert all(
         any(
-            dependency.call is is_admin_dep
+            dependency.call is _require_admin
             for dependency in route.dependant.dependencies
         )
         for route in admin_routes
     )
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    schema = app.openapi()
+    assert schema["paths"]["/api/admin/rooms"]["get"]["security"]
+    assert schema["paths"]["/api/admin/rooms/{room_id}"]["patch"]["security"]
 
 
 def test_unauthenticated_api_requests_keep_json_401_response():
