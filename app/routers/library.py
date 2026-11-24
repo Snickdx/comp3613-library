@@ -27,6 +27,9 @@ class BookingBody(BaseModel):
     end_time: str = Field(description="Workshop end time, HH:MM")
     resources: str = ""
 
+class OverrideAcceptBody(BaseModel):
+    override_justification: str = Field(min_length=1)
+
 
 def _actor_id(x_user_id: str | None) -> int:
     if not x_user_id:
@@ -77,13 +80,13 @@ def create_booking(
 @router.post("/bookings/{booking_id}/override-accept")
 def override_accept(
     booking_id: int,
-    override_justification: str | None = None,
+    body: OverrideAcceptBody,
     x_user_id: str | None = Header(default=None),
 ) -> dict[str, Any]:
     result = bookings.coordinator_override_accept(
         _actor_id(x_user_id),
         booking_id,
-        override_justification,
+        override_justification=body.override_justification,
         coordinator_override=True,
     )
     if not result.get("ok"):
